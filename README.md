@@ -107,6 +107,15 @@ sudo reboot
 | NVMe NOPPME | 비활성화 (= 0) |
 | 스케줄 태스크 | 부팅 시 + Windows Update 후 자동 재적용 |
 
+## 면책 조항 (Disclaimer)
+
+이 저장소의 스크립트와 설정은 **Claude Opus 4.6** (Anthropic)을 사용하여 작성되었습니다.
+
+**이 스크립트를 사용하여 발생하는 모든 문제에 대해 어떠한 책임도 지지 않습니다.**
+시스템 레지스트리, GRUB 설정, 전원 관리 등 핵심 시스템 구성을 변경하므로, 사용 전 반드시 백업하고 내용을 확인한 뒤 본인 책임하에 적용하세요.
+
+> **USE AT YOUR OWN RISK.** The author assumes no liability for any damage or data loss caused by using these scripts. Always back up your system before applying changes.
+
 ## 라이선스
 
 MIT License
