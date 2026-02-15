@@ -1,0 +1,23 @@
+Windows Registry Editor Version 5.00
+
+; SN740 PCIe Fix — Disable PCIe/AHCI Power Management
+; Prevents BSOD from PCIe Gen 4 link training failure on resume
+; Surface Pro 8 + WD SN740 NVMe
+
+; Disable AHCI Link Power Management - HIPM/DIPM
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\0012ee47-9041-4b5d-9b77-535fba8b1442\0b2d69d7-a2a1-449c-9680-f91c70521c60\DefaultPowerSchemeValues\381b4222-f694-41f0-9685-ff5bb260df2e]
+"AcSettingIndex"=dword:00000000
+"DcSettingIndex"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\0012ee47-9041-4b5d-9b77-535fba8b1442\0b2d69d7-a2a1-449c-9680-f91c70521c60\DefaultPowerSchemeValues\8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c]
+"AcSettingIndex"=dword:00000000
+"DcSettingIndex"=dword:00000000
+
+; Disable PCIe Link State Power Management
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\501a4d13-42af-4429-9fd1-a8218c268e20\ee12f906-d277-404b-b6da-e5fa1a576df5\DefaultPowerSchemeValues\381b4222-f694-41f0-9685-ff5bb260df2e]
+"AcSettingIndex"=dword:00000000
+"DcSettingIndex"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\501a4d13-42af-4429-9fd1-a8218c268e20\ee12f906-d277-404b-b6da-e5fa1a576df5\DefaultPowerSchemeValues\8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c]
+"AcSettingIndex"=dword:00000000
+"DcSettingIndex"=dword:00000000

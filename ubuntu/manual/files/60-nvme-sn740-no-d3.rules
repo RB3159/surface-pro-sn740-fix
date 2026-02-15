@@ -1,0 +1,4 @@
+# WD SN740 NVMe — prevent D3cold to avoid PCIe Gen 4 suspend crash
+# Vendor: 15b7 (Sandisk/WD), Device: 5015 (SN740)
+# Install: sudo cp 60-nvme-sn740-no-d3.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x15b7", ATTR{device}=="0x5015", ATTR{power/control}="on", ATTR{d3cold_allowed}="0"

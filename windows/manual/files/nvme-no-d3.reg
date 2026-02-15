@@ -1,0 +1,13 @@
+Windows Registry Editor Version 5.00
+
+; SN740 NVMe — Disable D3 power state transition
+; Prevents PCIe Gen 4 link training failure
+; VEN_15B7 = Sandisk/WD, DEV_5015 = SN740
+
+; NoIdleD3 for all storage controllers
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\stornvme\Parameters\Device]
+"NoIdleD3"=dword:00000001
+
+; NoLPM (No Link Power Management) 
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\storahci\Parameters\Device]
+"NoLPM"=dword:00000001
