@@ -69,8 +69,8 @@ function Read-LoadOption([byte[]]$Bytes) {
   [pscustomobject]@{ Description = $desc; Nodes = $nodes }
 }
 
-# Build an active EFI_LOAD_OPTION: <PrefixNodes>/File(<FilePath>)/End, no optional data.
-function New-LoadOption([string]$Description, [object[]]$PrefixNodes, [string]$FilePath) {
+# Build an active EFI_LOAD_OPTION: <PrefixNodes>/File(<FilePath>)/End, followed by OptionalData.
+function New-LoadOption([string]$Description, [object[]]$PrefixNodes, [string]$FilePath, [byte[]]$OptionalData = @()) {
   $fp = New-Object IO.MemoryStream
   foreach ($n in $PrefixNodes) { $fp.Write($n.Raw, 0, $n.Raw.Length) }
   $pathBytes = [Text.Encoding]::Unicode.GetBytes($FilePath + [char]0)
@@ -84,6 +84,7 @@ function New-LoadOption([string]$Description, [object[]]$PrefixNodes, [string]$F
   $ms.Write([BitConverter]::GetBytes([uint16]$fpBytes.Length), 0, 2)
   $d = [Text.Encoding]::Unicode.GetBytes($Description + [char]0); $ms.Write($d, 0, $d.Length)
   $ms.Write($fpBytes, 0, $fpBytes.Length)
+  if ($OptionalData.Length) { $ms.Write($OptionalData, 0, $OptionalData.Length) }
   , $ms.ToArray()
 }
 

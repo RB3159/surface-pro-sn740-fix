@@ -9,7 +9,7 @@ Ubuntu와 Windows 모두 지원하며, 자동 설치 / 수동 설치 버전을 �
 > **2026-10 업데이트 — 권장 방법이 바뀌었습니다.**
 > Windows에서 기존 전원 설정 방식(`windows/`)은 Modern Standby 크래시를 막지 못한다는 것을 시험으로 확인했습니다.
 > 대신 **부팅 전에 SSD 슬롯의 PCIe 링크를 Gen3로 제한**하는 [`uefi-gen3-link-cap/`](uefi-gen3-link-cap/README.md)을 추가했습니다.
-> 하드웨어 저전력을 유지하면서(절전 중 약 0.35–0.40 W) 커버 닫기 절전에서 정상 복귀했습니다.
+> 하드웨어 저전력에 들어간 절전 9회(커버 닫기 6회 포함)가 비정상 종료 없이 모두 정상 복귀했고, 절전 중 소모는 약 0.26–0.51 W였습니다.
 
 ## 문제 증상
 
@@ -173,7 +173,7 @@ Scripts that fix **Modern Standby crashes / BSODs** on a **Surface Pro 8 with a 
 > **October 2026 update — the recommended Windows fix has changed.**
 > Testing showed that the power-setting approach in `windows/` does not prevent Modern Standby resets.
 > The new [`uefi-gen3-link-cap/`](uefi-gen3-link-cap/README.md#english) **caps the SSD slot's PCIe link at Gen3 before the OS boots**.
-> With it, sleep (including closing the cover on battery) resumed normally with ~95–97% hardware DRIPS and about 0.35–0.40 W.
+> With it, all 9 sleeps that reached hardware low power (6 of them by closing the cover) resumed normally with no unexpected shutdowns, drawing about 0.26–0.51 W while asleep.
 
 ### Symptoms
 

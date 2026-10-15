@@ -56,20 +56,24 @@ try {
   $existing = @($boot.Entries | Where-Object { $_.Parsed.Nodes | Where-Object { $_.Path -eq $ShellFile } })
   if ($existing.Count -gt 1) { throw 'More than one boot entry already points at the Gen3 shell. Run Uninstall-Gen3.ps1 first.' }
   if ($existing.Count -eq 1) {
-    $num = $existing[0].Number; $option = $null
+    $num = $existing[0].Number; $nodes = $existing[0].Parsed.Nodes; $desc = $existing[0].Parsed.Description
+    $source = 'existing entry'
   } else {
     $template = $boot.Entries | Where-Object {
       ($_.Parsed.Nodes | Where-Object { $_.PartitionGuid -eq $esp.PartitionGuid }) -and ($_.Parsed.Nodes | Where-Object { $_.Path })
     } | Select-Object -First 1
     if (-not $template) { throw 'No existing boot entry on the ESP to copy the device path from.' }
-    $nodes = $template.Parsed.Nodes
-    $fileIdx = [array]::IndexOf($nodes, ($nodes | Where-Object { $_.Path } | Select-Object -First 1))
-    if ($fileIdx -lt 1) { throw 'Unexpected device path in the template boot entry.' }
     $num = 0x20..0xFF | Where-Object { $boot.Entries.Number -notcontains $_ } | Select-Object -First 1
-    $option = New-LoadOption $Description $nodes[0..($fileIdx - 1)] $ShellFile
+    $nodes = $template.Parsed.Nodes; $desc = $Description
+    $source = "new, device path copied from $($template.Name)"
   }
+  $fileIdx = [array]::IndexOf($nodes, ($nodes | Where-Object { $_.Path } | Select-Object -First 1))
+  if ($fileIdx -lt 1) { throw 'Unexpected device path in the boot entry.' }
+  # OptionalData "-delay 0": the shell skips its 5 s "Press ESC" prompt and still runs startup.nsh
+  $option = New-LoadOption $desc $nodes[0..($fileIdx - 1)] $ShellFile ([Text.Encoding]::Unicode.GetBytes('-delay 0' + [char]0))
+  if ($existing.Count -eq 1 -and $existing[0].Hex -eq (ConvertTo-Hex $option)) { $option = $null }
   $newOrder = @($num) + @($boot.BootOrder | Where-Object { $_ -ne $num })
-  Step ("Boot entry: Boot{0:X4} {1}" -f $num, $(if ($option) { "(new, copied device path from $($template.Name))" } else { '(already exists, reused)' }))
+  Step ("Boot entry: Boot{0:X4} ({1}) - {2}" -f $num, $source, $(if ($option) { 'will be written' } else { 'already up to date' }))
   Step ('BootOrder: ' + (($boot.BootOrder | ForEach-Object { 'Boot{0:X4}' -f $_ }) -join ',') + ' -> ' + (($newOrder | ForEach-Object { 'Boot{0:X4}' -f $_ }) -join ','))
   Step "After the Gen3 cap the shell starts: $handoff"
   if ($DryRun) { Step 'Dry run: nothing was written.'; return }
