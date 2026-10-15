@@ -1,5 +1,7 @@
 # PCIe Gen3 링크 제한 (권장, 2026-10)
 
+**[English](#english)** | 한국어
+
 Surface Pro 8의 SSD 슬롯은 CPU 직결 PCIe 4.0 포트(루트 포트 `00:06.0`, Intel `8086:9A09`)입니다. WD SN740은 여기서 **Gen4(16 GT/s) x4**로 연결되는데, 이 링크가 불안정해 Modern Standby 중 링크가 저전력 상태를 오갈 때 시스템이 리셋됩니다.
 
 이 방법은 **매 부팅마다 OS가 시작되기 전에 루트 포트의 최대 링크 속도를 Gen3(8 GT/s)로 낮춥니다.** SSD 펌웨어, Windows 레지스트리, NVMe 전원 관리는 바꾸지 않습니다.
@@ -121,3 +123,131 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-Gen3.ps1
 | `Uninstall-Gen3.ps1` | 제거 |
 | `Check-Gen3.ps1` | 현재 링크 속도 확인. `-Popup`은 로그온 작업용 |
 | `UefiBoot.ps1` | UEFI 부팅 변수·ESP 공용 함수 |
+
+---
+
+## English
+
+### PCIe Gen3 link cap (recommended, October 2026)
+
+The Surface Pro 8 SSD slot is a CPU-attached PCIe 4.0 port (root port `00:06.0`, Intel `8086:9A09`). The WD SN740 links there at **Gen4 (16 GT/s) x4**, and that link is unstable: the system resets when the link moves in and out of low-power states during Modern Standby.
+
+This fix **lowers the root port's maximum link speed to Gen3 (8 GT/s) on every boot, before the OS starts.** It does not change the SSD firmware, the Windows registry or NVMe power management.
+
+### Evidence
+
+#### 1. The Gen4 link logs real errors
+
+PCIe AER registers read from the UEFI Shell. On the Surface Pro 8 the OS does not get AER control (`PCIExpressAERControl=False`), so **these errors never reach the Windows event log.**
+
+| Location | Value | Meaning |
+|---|---|---|
+| SSD AER Correctable Status | `0x000000C1` | Receiver Error, Bad TLP, Bad DLLP (signal corrupted on the root port → SSD direction) |
+| SSD Physical Layer 16.0 GT/s | Local Data Parity Mismatch `0x08` | 16 GT/s data parity mismatch on **lane 3** |
+| Root port AER Correctable Status | `0x00001100` | Replay Timer Timeout, REPLAY_NUM Rollover (repeated retransmission) |
+
+16 GT/s equalization completed (phases 1–3 successful on both sides), yet errors occurred during operation. On one boot even the 16 → 8 GT/s speed-change negotiation failed and the link stayed at 16 GT/s.
+
+#### 2. Software power settings do not fix it
+
+Eleven conditions were tested at Gen4: PCIe ASPM off / moderate / maximum, adapter `DisableD3Cold`, `StorageD3InModernStandby=0`, an NVMe resume-latency limit, capping the operational power state at PS2, detaching the cover, and more. **About half of roughly 17 sleeps that reached hardware low power (DRIPS)** ended in a reset (`Kernel-Power 41`, `ConnectedStandbyInProgress=true`, `BugcheckCode=0`), and no setting lowered that rate. Every second sleep in the same boot after a successful first one failed (4 of 4).
+
+The only condition without resets was adapter `DisableRuntimePowerManagement=1`. But the link then stays in L0, hardware low power is 0% and sleep draws about 4 W, so it is not usable.
+
+#### 3. Results at Gen3
+
+| # | Condition | Length | HW DRIPS | Average draw | Result |
+|---|---|---|---|---|---|
+| 1 | Start-menu sleep, charging | 5 min | 88.5% | (charging) | Resumed normally, still Gen3 |
+| 2 | Start-menu sleep, battery, **second sleep in the same boot** | 6 min | 94.9% | 0.40 W | Resumed normally, still Gen3 |
+| 3 | **Cover closed**, battery (boot with the installed auto-apply) | 17.1 min | 96.9% | 0.35 W | Resumed normally, still Gen3 |
+
+Given the Gen4 failure rate (about 50% per sleep), three passes in a row are not yet conclusive (about 12% chance by luck). Longer and repeated testing is ongoing.
+
+### How it works
+
+PCIe negotiates a link speed both sides support, **no higher than the root port's Target Link Speed**. This has the same effect as limiting the SSD to PCIe 3.0, but from the PC side and without touching the SSD firmware. (Sabrent has also [mentioned](https://www.reddit.com/r/Surface/comments/12sv4km/surface_pro_8_ssd_upgrade/) the Surface Pro 8's PCIe 4.0 signal quality and limiting to 3.0.)
+
+```
+Power on → firmware links the SSD at Gen4
+→ [UEFI Shell, startup.nsh]
+     Root port Link Control 2 (0x70) Target Link Speed = 3 (8 GT/s)
+     Link Control (0x50) Retrain Link × 6   ← repeated: the speed change negotiated over 16 GT/s can fail
+→ rEFInd (if installed) or Windows Boot Manager
+→ Windows: link at 8 GT/s x4
+```
+
+- A retrain renegotiates the link without resetting the SSD, so it is safe while the firmware is using the drive.
+- The root port setting **survives sleep (including D3cold)**. It is reset on reboot, so the shell reapplies it on every boot.
+- If the shell fails for any reason, it `exit`s back to the firmware, which boots the next entry in the existing boot order as before (at Gen4).
+- For diagnostics, the shell writes the previous session's AER errors (`apply\*-before.txt`) and the result (`apply\*-after.txt`, `lnksta-low-byte.txt`) to `\EFI\Gen3\apply` on the ESP.
+
+### Requirements
+
+- **Surface Pro 8 + WD SN740** (`15B7:5015`), with the SSD on bus 1 behind root port `00:06.0`. The installer checks this and stops otherwise.
+- **Secure Boot off.** The UEFI Shell is not signed by Microsoft, so it will not run with Secure Boot on. Turn it off in Surface UEFI (Volume Up + Power) → Security → Secure Boot. The boot screen then shows a red bar and boot-time malware protection is weaker. **Only use this if you accept that security trade-off.**
+- **BitLocker / Device Encryption off or suspended.** Changing the boot path triggers a recovery-key prompt. Running with it on has not been tested.
+- Internet access during install (to download the UEFI Shell). Offline, download the same file and pass it with `-ShellPath`.
+- If the legacy Windows settings (`windows/auto`) are installed, removing them first with `windows/auto/uninstall.cmd` is recommended.
+
+### Install
+
+In an elevated PowerShell:
+
+```powershell
+cd surface-pro-sn740-fix\uefi-gen3-link-cap
+powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1 -DryRun   # checks and plan only, writes nothing
+powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1
+```
+
+The installer:
+
+1. Downloads `shellx64.efi` from [pbatard/UEFI-Shell](https://github.com/pbatard/UEFI-Shell) 26H1 (edk2-stable202602) and checks SHA256 `4ea080dd…7b11e0`
+2. Copies `\EFI\Gen3\shellx64.efi`, `startup.nsh` and `gen3.marker` to the ESP
+3. Creates the UEFI boot entry `SN740 Gen3 (UEFI Shell)` (using the device path of an existing Windows entry) and puts it first in BootOrder; existing entries keep their order
+4. Registers the task `SN740 Gen3 Link Check`, which shows a warning at sign-in if the link is not Gen3
+5. Backs up the NVRAM boot entries to `%ProgramData%\SN740-Gen3\nvram-backup.json`
+
+After a restart, a black shell screen shows for about 8 seconds before the usual boot screen. **Do not press ESC on the shell screen.** If it stops at a `Shell>` prompt, type `exit`.
+
+To make closing the cover on battery go to sleep (if you used hibernate as a workaround):
+
+```powershell
+powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
+powercfg /setactive SCHEME_CURRENT
+```
+
+### Verify
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Check-Gen3.ps1
+# SN740 link: Gen3 (8 GT/s) - Gen3 cap active
+```
+
+In Device Manager → Storage controllers → Standard NVM Express Controller → Details → "PCI current link speed", a value of `3` means the cap is active.
+
+### Uninstall
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Gen3.ps1
+```
+
+Removes the boot entry, its BootOrder reference, `\EFI\Gen3` on the ESP and the sign-in task. The link returns to Gen4 from the next boot.
+
+### Side effects and limitations
+
+- Boot takes about 8 seconds longer (5-second shell startup delay plus retraining).
+- Sequential read is capped at **about 3.5 GB/s** instead of about 5 GB/s (DiskSpd 128K QD32×4: 3,338 MiB/s). Hard to notice in everyday use.
+- **Turning Secure Boot back on**, or a firmware / Windows update that changes BootOrder, disables the cap. The sign-in warning then appears. On a boot with that warning, do not close the cover on battery; restart once.
+- The shell starts rEFInd, so Linux booted through rEFInd also gets Gen3. Its effect on Linux suspend has not been tested.
+- Verified on one device only: Surface Pro 8, WD PC SN740 `SDDPTQE-2T00` firmware `73117000`, Windows 11 25H2 (26200.8457), Surface UEFI 33.106.143.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `startup.nsh` | UEFI Shell startup script: Gen3 cap, retrain and diagnostic dumps, then the next boot loader |
+| `Install-Gen3.ps1` | Install. `-DryRun` only checks |
+| `Uninstall-Gen3.ps1` | Uninstall |
+| `Check-Gen3.ps1` | Show the current link speed. `-Popup` is used by the sign-in task |
+| `UefiBoot.ps1` | Shared helpers for UEFI boot variables and the ESP |

@@ -1,5 +1,7 @@
 # Surface Pro 8 + WD SN740 NVMe Fix
 
+**[English](#english)** | 한국어
+
 Surface Pro 8에서 **WD SN740 NVMe** 사용 시 발생하는 **절전 크래시 / BSOD** 문제를 수정하는 스크립트 모음입니다.
 
 Ubuntu와 Windows 모두 지원하며, 자동 설치 / 수동 설치 버전을 제공합니다.
@@ -159,5 +161,93 @@ powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1
 > **USE AT YOUR OWN RISK.** The author assumes no liability for any damage or data loss caused by using these scripts. Always back up your system before applying changes.
 
 ## 라이선스
+
+MIT License
+
+---
+
+## English
+
+Scripts that fix **Modern Standby crashes / BSODs** on a **Surface Pro 8 with a WD SN740 NVMe SSD**, for Windows and Ubuntu.
+
+> **October 2026 update — the recommended Windows fix has changed.**
+> Testing showed that the power-setting approach in `windows/` does not prevent Modern Standby resets.
+> The new [`uefi-gen3-link-cap/`](uefi-gen3-link-cap/README.md#english) **caps the SSD slot's PCIe link at Gen3 before the OS boots**.
+> With it, sleep (including closing the cover on battery) resumed normally with ~95–97% hardware DRIPS and about 0.35–0.40 W.
+
+### Symptoms
+
+| OS | Symptom |
+|----|---------|
+| **Ubuntu** | Black screen / kernel panic after suspend or closing the cover |
+| **Windows** | BSOD (`WHEA_UNCORRECTABLE_ERROR`) after sleep or during use |
+| **Windows** | Silent **reset** a few minutes into sleep: programs are closed, `Kernel-Power 41` with `ConnectedStandbyInProgress=true` and `BugcheckCode=0`, a WHEA record at the next boot. Sometimes the screen stays black on wake until the power button is held down |
+
+### Root cause
+
+The Surface Pro 8 SSD slot is a CPU-attached PCIe 4.0 port (root port `00:06.0`, Intel `8086:9A09`), so the WD SN740 (`15b7:5015`) links at **Gen4 x4**. That **Gen4 link is marginal**: during Modern Standby it enters and leaves low-power states (L1.2, D3cold), and re-establishing it can fail, which resets the platform. The Surface Pro 8 supports only Modern Standby (s2idle), not S3.
+
+AER registers read from a UEFI Shell showed **Gen4 link errors**: receiver errors / Bad TLP / Bad DLLP on the SSD, a 16 GT/s **parity mismatch on lane 3**, and replay timeouts on the root port. Windows does not get AER control on this platform, so none of this shows up in the event log. Details: [uefi-gen3-link-cap/README.md](uefi-gen3-link-cap/README.md#english).
+
+### Windows — PCIe Gen3 link cap (recommended)
+
+**Secure Boot must be off.** Read the requirements and security impact in [uefi-gen3-link-cap/README.md](uefi-gen3-link-cap/README.md#english) first.
+
+```powershell
+git clone https://github.com/RB3159/surface-pro-sn740-fix.git
+cd surface-pro-sn740-fix\uefi-gen3-link-cap
+# elevated PowerShell
+powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1
+```
+
+Restart once. If no warning appears after you sign in, the cap is active (check with `Check-Gen3.ps1`).
+
+| Item | Change |
+|------|--------|
+| ESP | UEFI Shell + `startup.nsh` in `\EFI\Gen3` |
+| UEFI boot order | Adds `SN740 Gen3 (UEFI Shell)` as the first entry; existing entries are kept |
+| Every boot | Root port `00:06.0` Target Link Speed = 8 GT/s, link retrain, then rEFInd or Windows Boot Manager |
+| Scheduled task | Warns at sign-in if the link is not Gen3 |
+| SSD firmware / registry | Unchanged |
+
+### Windows — power settings (legacy)
+
+`windows/` turns off PCIe ASPM, AHCI link power management and the NVMe idle timeout, and sets `NoIdleD3` / `NoLPM`. In October 2026 testing these did **not** stop the Modern Standby resets (including with ASPM off), and `NoIdleD3` / `NoLPM` are not read by the current Windows 11 `stornvme.sys` (they only exist in `storahci.sys`). Kept for reference: right-click `windows/auto/install.cmd` → Run as administrator, or see [windows/manual/README.md](windows/manual/README.md).
+
+### Ubuntu
+
+```bash
+git clone https://github.com/RB3159/surface-pro-sn740-fix.git
+cd surface-pro-sn740-fix/ubuntu/auto
+sudo bash install.sh
+sudo reboot
+```
+
+| Item | Change |
+|------|--------|
+| GRUB | Removes `pcie_aspm=off`, adds `nvme_core.default_ps_max_latency_us=0` |
+| Suspend hook | Blocks NVMe D3cold (`d3cold_allowed=0`, `power/control=on`) |
+| udev | Blocks D3cold for the SN740 at boot |
+| logind | Closing the cover → suspend |
+
+Manual steps: [ubuntu/manual/README.md](ubuntu/manual/README.md). The Gen3 cap also applies to Linux when it is booted through rEFInd, but that combination has not been tested.
+
+### Applies to
+
+- **Hardware**: Surface Pro 8 (Intel 11th Gen Tiger Lake)
+- **NVMe**: WD SN740 (`15b7:5015`), PCIe Gen 4
+- **OS**: Ubuntu 22.04+ (linux-surface kernel), Windows 10/11
+- The Ubuntu and legacy Windows scripts may also work on other devices with an SN740. `uefi-gen3-link-cap/` refuses to install on anything other than the Surface Pro 8 PCIe topology.
+
+### Disclaimer
+
+The scripts in this repository were written with **Claude Opus 4.6** (Anthropic). The October 2026 update (`uefi-gen3-link-cap/`) was written with **Claude Opus 5.5**.
+
+`uefi-gen3-link-cap/` writes to PCI configuration space before boot and changes UEFI boot entries, with Secure Boot off. It has been verified on one device only.
+
+**USE AT YOUR OWN RISK.** The author assumes no liability for any damage or data loss caused by using these scripts. Always back up your system before applying changes.
+
+### License
 
 MIT License
