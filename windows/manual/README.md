@@ -2,6 +2,8 @@
 
 Surface Pro 8 + WD SN740 NVMe BSOD 수동 수정 방법입니다.
 
+> **구버전 (2026-10).** 이 설정들로는 Modern Standby 중 리셋이 계속 발생했습니다(PCIe ASPM 끄기 포함). `NoIdleD3`/`NoLPM`은 현재 `stornvme.sys`가 읽지 않는 값입니다. 권장 방법은 [PCIe Gen3 링크 제한](../../uefi-gen3-link-cap/README.md)입니다.
+
 ## 문제 원인
 
 - Windows의 **PCIe Link State Power Management**와 **AHCI ASPM**이 NVMe를 저전력 상태로 전환

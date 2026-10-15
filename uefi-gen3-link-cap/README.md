@@ -1,0 +1,123 @@
+# PCIe Gen3 링크 제한 (권장, 2026-10)
+
+Surface Pro 8의 SSD 슬롯은 CPU 직결 PCIe 4.0 포트(루트 포트 `00:06.0`, Intel `8086:9A09`)입니다. WD SN740은 여기서 **Gen4(16 GT/s) x4**로 연결되는데, 이 링크가 불안정해 Modern Standby 중 링크가 저전력 상태를 오갈 때 시스템이 리셋됩니다.
+
+이 방법은 **매 부팅마다 OS가 시작되기 전에 루트 포트의 최대 링크 속도를 Gen3(8 GT/s)로 낮춥니다.** SSD 펌웨어, Windows 레지스트리, NVMe 전원 관리는 바꾸지 않습니다.
+
+## 근거
+
+### 1. Gen4 링크에서 실제 오류가 기록됨
+
+UEFI Shell로 읽은 PCIe AER 레지스터입니다. Surface Pro 8에서는 OS가 AER 제어권을 받지 못해(`PCIExpressAERControl=False`) **Windows 이벤트 로그에 이 오류가 남지 않습니다.**
+
+| 위치 | 기록 | 의미 |
+|---|---|---|
+| SSD AER Correctable Status | `0x000000C1` | Receiver Error, Bad TLP, Bad DLLP (루트 포트 → SSD 방향 신호 손상) |
+| SSD Physical Layer 16.0 GT/s | Local Data Parity Mismatch `0x08` | **레인 3**에서 16 GT/s 데이터 패리티 불일치 |
+| 루트 포트 AER Correctable Status | `0x00001100` | Replay Timer Timeout, REPLAY_NUM Rollover (재전송 반복) |
+
+16 GT/s 등화(equalization)는 양쪽 모두 Phase 1–3 성공으로 끝났지만 운용 중 오류가 발생했습니다. 한 부팅에서는 16 → 8 GT/s 속도 전환 협상 자체가 실패해 링크가 16 GT/s에 남기도 했습니다.
+
+### 2. 소프트웨어 전원 설정으로는 해결되지 않음
+
+Gen4 상태에서 11가지 조건을 시험했습니다: PCIe ASPM 끄기/보통/최대, 어댑터 `DisableD3Cold`, `StorageD3InModernStandby=0`, NVMe 복귀 지연 제한, 동작 전력 단계 PS2 제한, 커버 분리 등. **실제 저전력(DRIPS)에 들어간 절전 약 17회 중 약 절반이** `Kernel-Power 41`(`ConnectedStandbyInProgress=true`, `BugcheckCode=0`)로 리셋됐고, 어느 설정도 실패율을 낮추지 못했습니다. 같은 부팅에서 첫 절전이 성공한 뒤의 두 번째 절전은 4번 모두 실패했습니다.
+
+리셋이 없던 유일한 조건은 어댑터 `DisableRuntimePowerManagement=1`이었습니다. 하지만 링크가 L0에 머물러 하드웨어 저전력 0%, 절전 중 약 4 W를 소모해 실사용이 불가능했습니다.
+
+### 3. Gen3에서의 결과
+
+| # | 조건 | 길이 | HW DRIPS | 평균 소모 | 결과 |
+|---|---|---|---|---|---|
+| 1 | 메뉴 절전, 충전 중 | 5분 | 88.5% | (충전 중) | 정상 복귀, Gen3 유지 |
+| 2 | 메뉴 절전, 배터리, **같은 부팅 두 번째 절전** | 6분 | 94.9% | 0.40 W | 정상 복귀, Gen3 유지 |
+| 3 | **커버 닫기**, 배터리 (설치 후 자동 적용 부팅) | 17.1분 | 96.9% | 0.35 W | 정상 복귀, Gen3 유지 |
+
+Gen4 기준 실패율(약 50%/회)을 감안하면 3회 연속 통과는 아직 확정이 아닙니다(우연 확률 약 12%). 장시간·다회 검증은 진행 중입니다.
+
+## 동작 원리
+
+PCIe 링크 속도는 양쪽이 지원하는 속도 중 **루트 포트의 Target Link Speed 이하**로 협상됩니다. SSD 쪽에서 링크를 PCIe 3.0으로 제한하는 것과 같은 효과를, SSD 펌웨어를 고치지 않고 PC 쪽에서 냅니다. (Sabrent도 Surface Pro 8의 PCIe 4.0 신호 품질 문제와 3.0 제한을 [언급](https://www.reddit.com/r/Surface/comments/12sv4km/surface_pro_8_ssd_upgrade/)한 바 있습니다.)
+
+```
+전원 켜짐 → 펌웨어가 SSD를 Gen4로 연결
+→ [UEFI Shell, startup.nsh]
+     루트 포트 Link Control 2 (0x70) Target Link Speed = 3 (8 GT/s)
+     Link Control (0x50) Retrain Link × 6   ← 16 GT/s 위에서의 속도 전환 협상이 실패할 수 있어 반복
+→ rEFInd (설치돼 있으면) 또는 Windows Boot Manager
+→ Windows: 링크 8 GT/s x4
+```
+
+- 재학습(retrain)은 SSD를 리셋하지 않고 링크 조건만 다시 협상합니다. 펌웨어가 SSD를 쓰고 있는 동안에도 안전합니다.
+- 루트 포트 설정은 **절전(D3cold 포함) 복귀 후에도 유지**됩니다. 재부팅하면 초기화되므로 셸이 매 부팅 다시 적용합니다.
+- 셸이 어떤 이유로든 실패하면 `exit`로 펌웨어에 돌아가고, 기존 부팅 순서대로 평소처럼(Gen4) 부팅됩니다.
+- 셸은 진단용으로 직전 세션의 AER 오류(`apply\*-before.txt`)와 적용 결과(`apply\*-after.txt`, `lnksta-low-byte.txt`)를 ESP의 `\EFI\Gen3\apply`에 남깁니다.
+
+## 요구 사항
+
+- **Surface Pro 8 + WD SN740** (`15B7:5015`), SSD가 루트 포트 `00:06.0`의 버스 1에 있을 것. 설치 스크립트가 확인하고, 다르면 중단합니다.
+- **Secure Boot 꺼짐.** UEFI Shell은 Microsoft 서명이 없어 Secure Boot가 켜져 있으면 실행되지 않습니다. Surface UEFI(볼륨 업 + 전원) → Security → Secure Boot에서 끌 수 있습니다. 부팅 화면에 빨간 막대가 표시되고, 부팅 단계 악성코드 방어가 약해집니다. **이 보안상 손실을 감수할 수 있을 때만 사용하세요.**
+- **BitLocker / 장치 암호화 꺼짐 또는 일시 중단.** 부팅 경로가 바뀌면 복구 키를 요구합니다. 켜진 상태에서의 동작은 검증하지 않았습니다.
+- 설치 시 인터넷 연결(UEFI Shell 다운로드). 오프라인이면 같은 파일을 받아 `-ShellPath`로 지정하세요.
+- 기존 Windows 우회 설정(`windows/auto`)이 설치돼 있으면 먼저 `windows/auto/uninstall.cmd`로 제거하는 것을 권장합니다.
+
+## 설치
+
+관리자 PowerShell에서:
+
+```powershell
+cd surface-pro-sn740-fix\uefi-gen3-link-cap
+powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1 -DryRun   # 점검과 계획만 출력, 쓰기 없음
+powershell -ExecutionPolicy Bypass -File .\Install-Gen3.ps1
+```
+
+설치 스크립트가 하는 일:
+
+1. [pbatard/UEFI-Shell](https://github.com/pbatard/UEFI-Shell) 26H1(edk2-stable202602)의 `shellx64.efi`를 받아 SHA256 `4ea080dd…7b11e0`를 확인
+2. ESP에 `\EFI\Gen3\shellx64.efi`, `startup.nsh`, `gen3.marker` 복사
+3. UEFI 부팅 항목 `SN740 Gen3 (UEFI Shell)` 생성(기존 Windows 항목의 장치 경로 사용) 후 BootOrder 1순위로 설정. 기존 항목과 순서는 유지
+4. 로그온 시 링크가 Gen3가 아니면 경고 창을 띄우는 작업 `SN740 Gen3 Link Check` 등록
+5. 설치 전 NVRAM 부팅 항목을 `%ProgramData%\SN740-Gen3\nvram-backup.json`에 백업
+
+재시작하면 검은 셸 화면이 약 8초 보인 뒤 평소 부팅 화면으로 넘어갑니다. **셸 화면에서 ESC를 누르지 마세요.** `Shell>` 프롬프트에서 멈추면 `exit`를 입력하면 됩니다.
+
+배터리에서 커버를 닫으면 절전하도록 하려면(최대 절전 우회 설정을 써 왔다면):
+
+```powershell
+powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
+powercfg /setactive SCHEME_CURRENT
+```
+
+## 확인
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Check-Gen3.ps1
+# SN740 link: Gen3 (8 GT/s) - Gen3 cap active
+```
+
+장치 관리자 → 저장소 컨트롤러 → 표준 NVM Express 컨트롤러 → 자세히 → "PCI 현재 링크 속도"가 `3`이면 적용된 것입니다.
+
+## 제거
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Gen3.ps1
+```
+
+부팅 항목, BootOrder 참조, ESP의 `\EFI\Gen3`, 로그온 작업을 제거합니다. 다음 부팅부터 Gen4로 돌아갑니다.
+
+## 부작용과 한계
+
+- 부팅 시간 약 8초 증가(셸 시작 대기 5초 + 재학습).
+- 순차 읽기 상한이 약 5 GB/s에서 **약 3.5 GB/s**로 낮아집니다(DiskSpd 128K QD32×4: 3,338 MiB/s). 일상 사용에서는 체감이 어렵습니다.
+- **Secure Boot를 다시 켜거나**, 펌웨어·Windows 업데이트가 BootOrder를 바꾸면 Gen3가 적용되지 않습니다. 이때는 로그온 경고가 뜹니다. 경고가 뜬 부팅에서는 배터리로 커버를 닫지 말고 한 번 재시작하세요.
+- 셸이 rEFInd를 실행하므로 rEFInd로 부팅하는 Linux에도 Gen3가 적용됩니다. Linux에서의 절전 효과는 검증하지 않았습니다.
+- 한 대의 기기에서만 검증했습니다: Surface Pro 8, WD PC SN740 `SDDPTQE-2T00` 펌웨어 `73117000`, Windows 11 25H2 (26200.8457), Surface UEFI 33.106.143.
+
+## 파일
+
+| 파일 | 역할 |
+|---|---|
+| `startup.nsh` | UEFI Shell 시작 스크립트. 루트 포트 Gen3 제한·재학습·진단 덤프 후 다음 부트로더 실행 |
+| `Install-Gen3.ps1` | 설치. `-DryRun`은 점검만 |
+| `Uninstall-Gen3.ps1` | 제거 |
+| `Check-Gen3.ps1` | 현재 링크 속도 확인. `-Popup`은 로그온 작업용 |
+| `UefiBoot.ps1` | UEFI 부팅 변수·ESP 공용 함수 |
